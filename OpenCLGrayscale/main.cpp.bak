@@ -1,0 +1,123 @@
+#ifdef __APPLE__
+    #include "OpenCL/opencl.h"
+#else
+    #include "CL/cl.h"
+#endif
+
+#include "cl.hpp"
+#include <iostream>
+#include "lib/FreeImage/Source/FreeImage.h"
+
+const char *kernelSource =                                       "  \n" \
+"#pragma OPENCL EXTENSION cl_khr_fp64 : enable                      \n" \
+"__kernel void grayscale(  __global int *input,                    \n" \
+"                          __global int *output)                    \n" \
+"{                                                                  \n" \
+"    //Get our global thread ID                                     \n" \
+"    int id = get_global_id(0);                                     \n" \
+"                                                                   \n" \
+"    output[id][0] = 255;                                           \n" \
+"    for (int i = 1; i < 4; i++) {                                  \n" \
+"       output[id][i] = 0.21 * input[id][1] + 0.72 * input[id][2] + 0.07 * input[id][3]; \n" \
+"    }                                                              \n" \
+"}                                                                  \n" \
+"\n";
+
+int main(int argc, const char * argv[]) {
+    // Image size
+    size_t width = 2048,
+           height = 2048;
+    
+    unsigned long bytes = width * height * 4;
+    
+    // Device input buffers
+    cl_mem input_buffer;
+    
+    // Device output buffer
+    cl_mem output_buffer;
+    
+    cl_platform_id cpPlatform;        // OpenCL platform
+    cl_device_id device_id;           // device ID
+    cl_context context;               // context
+    cl_command_queue queue;           // command queue
+    cl_program program;               // program
+    cl_kernel kernel;                 // kernel
+    
+    // Bind to platform
+    clGetPlatformIDs(1, &cpPlatform, NULL);
+    
+    // Get ID for the device
+    clGetDeviceIDs(cpPlatform, CL_DEVICE_TYPE_GPU, 1, &device_id, NULL);
+    
+    // Create a context
+    context = clCreateContext(0, 1, &device_id, NULL, NULL, NULL);
+    
+    // Create a command queue
+    queue = clCreateCommandQueue(context, device_id, 0, NULL);
+    
+    // Create the kernel program
+    program = clCreateProgramWithSource(context, 1, (const char **) & kernelSource, NULL, NULL);
+    clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+    kernel = clCreateKernel(program, "grayscale", NULL);
+    
+    // Define the image format
+    cl_image_format format;
+    format.image_channel_order = CL_RGBA;
+    format.image_channel_data_type = CL_UNSIGNED_INT8;
+    
+    // Create the input image pixels
+    int **input_pixels = new int*[width * height];
+    for (int i = 0; i < width * height; i++) {
+        input_pixels[i] = new int[4];
+        input_pixels[i][0] = 255;
+        input_pixels[i][1] = 0;
+        input_pixels[i][2] = 0;
+        input_pixels[i][3] = 255;
+    }
+    
+    // Create the output image pixels
+    int **output_pixels = (int**)malloc(width * height);
+    
+    // Create the output image
+    cl_mem outputImage = gcl_create_image(&format, width, height, 1, NULL);
+    
+    // Create the input buffers
+    input_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(cl_mem), NULL, NULL);
+    
+    // Create the output buffers
+    output_buffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(cl_mem), NULL, NULL);
+    
+    // Write our data set into the input array in device memory
+    clEnqueueWriteBuffer(queue, input_buffer, CL_TRUE, 0, sizeof(cl_mem), input_pixels, 0, NULL, NULL);
+    
+    // Set the arguments to our compute kernel
+    clSetKernelArg(kernel, 0, sizeof(cl_mem), input_buffer);
+    
+    // Execute the kernel program over the input data
+    clEnqueueNDRangeKernel(queue, kernel, 1, NULL, (size_t*)(width * height), (size_t*)64, 0, NULL, NULL);
+    
+    // Wait for the queue to finish
+    clFinish(queue);
+    
+    // Read the results from the device
+    cl_int err = clEnqueueReadBuffer(queue, output_buffer, CL_TRUE, 0, sizeof(cl_mem), output_pixels, 0, NULL, NULL);
+    
+    // Check the output value
+    fprintf(stdout, "R: %d, G: %d, B: %d, A: %d", output_pixels[0][0], output_pixels[0][1], output_pixels[0][2], output_pixels[0][3]);
+    
+    fprintf(stdout, "\nDone.\n\n");
+    
+    // Release OpenCL resources
+    clReleaseMemObject(input_buffer);
+    clReleaseMemObject(output_buffer);
+    clReleaseProgram(program);
+    clReleaseKernel(kernel);
+    clReleaseCommandQueue(queue);
+    clReleaseContext(context);
+    
+    // Release host memory
+    free(input_pixels);
+    free(output_pixels);
+    
+    return 0;
+}
