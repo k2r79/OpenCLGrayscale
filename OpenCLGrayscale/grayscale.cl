@@ -3,5 +3,5 @@ __kernel void grayscale(__global int *r, __global int *g, __global int *b, __glo
     unsigned int i = get_global_id(0);
 
     // Grayscale
-    output[i] = 50; //0.21 * r[i] + 0.72 * g[i] + 0.07 * b[i];
+    output[i] = 0.21 * r[i] + 0.72 * g[i] + 0.07 * b[i];
 }
